@@ -1046,9 +1046,10 @@ namespace Emby.Server.Implementations.Data
             foreach (var part in value.SpanSplit('|'))
             {
                 var providerDelimiterIndex = part.IndexOf('=');
-                if (providerDelimiterIndex != -1 && providerDelimiterIndex == part.LastIndexOf('='))
+                // Don't let empty values through
+                if (providerDelimiterIndex != -1 && part.Length != providerDelimiterIndex + 1)
                 {
-                    item.SetProviderId(part.Slice(0, providerDelimiterIndex).ToString(), part.Slice(providerDelimiterIndex + 1).ToString());
+                    item.SetProviderId(part[..providerDelimiterIndex].ToString(), part[(providerDelimiterIndex + 1)..].ToString());
                 }
             }
         }
@@ -5693,13 +5694,17 @@ AND Type = @InternalPersonType)");
 
             item.IsHearingImpaired = reader.TryGetBoolean(43, out var result) && result;
 
-            if (item.Type == MediaStreamType.Subtitle)
+            if (item.Type is MediaStreamType.Audio or MediaStreamType.Subtitle)
             {
-                item.LocalizedUndefined = _localization.GetLocalizedString("Undefined");
                 item.LocalizedDefault = _localization.GetLocalizedString("Default");
-                item.LocalizedForced = _localization.GetLocalizedString("Forced");
                 item.LocalizedExternal = _localization.GetLocalizedString("External");
-                item.LocalizedHearingImpaired = _localization.GetLocalizedString("HearingImpaired");
+
+                if (item.Type is MediaStreamType.Subtitle)
+                {
+                    item.LocalizedUndefined = _localization.GetLocalizedString("Undefined");
+                    item.LocalizedForced = _localization.GetLocalizedString("Forced");
+                    item.LocalizedHearingImpaired = _localization.GetLocalizedString("HearingImpaired");
+                }
             }
 
             return item;

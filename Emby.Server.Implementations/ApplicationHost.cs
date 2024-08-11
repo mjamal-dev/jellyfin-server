@@ -40,6 +40,7 @@ using Jellyfin.MediaEncoding.Hls.Playlist;
 using Jellyfin.Networking.Manager;
 using Jellyfin.Networking.Udp;
 using Jellyfin.Server.Implementations;
+using Jellyfin.Server.Implementations.MediaSegments;
 using MediaBrowser.Common;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Events;
@@ -552,6 +553,8 @@ namespace Emby.Server.Implementations
             serviceCollection.AddScoped<DynamicHlsHelper>();
             serviceCollection.AddScoped<IClientEventLogger, ClientEventLogger>();
             serviceCollection.AddSingleton<IDirectoryService, DirectoryService>();
+
+            serviceCollection.AddSingleton<IMediaSegmentManager, MediaSegmentManager>();
         }
 
         /// <summary>
@@ -635,6 +638,7 @@ namespace Emby.Server.Implementations
             UserView.TVSeriesManager = Resolve<ITVSeriesManager>();
             UserView.CollectionManager = Resolve<ICollectionManager>();
             BaseItem.MediaSourceManager = Resolve<IMediaSourceManager>();
+            BaseItem.MediaSegmentManager = Resolve<IMediaSegmentManager>();
             CollectionFolder.XmlSerializer = _xmlSerializer;
             CollectionFolder.ApplicationHost = this;
         }
@@ -664,7 +668,8 @@ namespace Emby.Server.Implementations
                 GetExports<IMetadataService>(),
                 GetExports<IMetadataProvider>(),
                 GetExports<IMetadataSaver>(),
-                GetExports<IExternalId>());
+                GetExports<IExternalId>(),
+                GetExports<IExternalUrlProvider>());
 
             Resolve<IMediaSourceManager>().AddParts(GetExports<IMediaSourceProvider>());
         }

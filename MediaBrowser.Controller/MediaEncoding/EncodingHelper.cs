@@ -64,6 +64,7 @@ namespace MediaBrowser.Controller.MediaEncoding
         private readonly Version _minFFmpegSvtAv1Params = new Version(5, 1);
         private readonly Version _minFFmpegVaapiH26xEncA53CcSei = new Version(6, 0);
         private readonly Version _minFFmpegReadrateOption = new Version(5, 0);
+        private readonly Version _minFFmpegWorkingVtHwSurface = new Version(7, 0, 1);
 
         private static readonly Regex _validationRegex = new(ValidationRegex, RegexOptions.Compiled);
 
@@ -120,7 +121,8 @@ namespace MediaBrowser.Controller.MediaEncoding
         private static readonly Dictionary<string, string> _mjpegCodecMap = new(StringComparer.OrdinalIgnoreCase)
         {
             { "vaapi", _defaultMjpegEncoder + "_vaapi" },
-            { "qsv", _defaultMjpegEncoder + "_qsv" }
+            { "qsv", _defaultMjpegEncoder + "_qsv" },
+            { "videotoolbox", _defaultMjpegEncoder + "_videotoolbox" }
         };
 
         public static readonly string[] LosslessAudioCodecs = new string[]
@@ -274,6 +276,21 @@ namespace MediaBrowser.Controller.MediaEncoding
                 && _mediaEncoder.SupportsFilter("overlay_videotoolbox")
                 && _mediaEncoder.SupportsFilter("tonemap_videotoolbox")
                 && _mediaEncoder.SupportsFilter("scale_vt");
+        }
+
+        private bool IsSwTonemapAvailable(EncodingJobInfo state, EncodingOptions options)
+        {
+            if (state.VideoStream is null
+                || !options.EnableTonemapping
+                || GetVideoColorBitDepth(state) != 10
+                || !_mediaEncoder.SupportsFilter("tonemapx")
+                || !(string.Equals(state.VideoStream?.ColorTransfer, "smpte2084", StringComparison.OrdinalIgnoreCase) || string.Equals(state.VideoStream?.ColorTransfer, "arib-std-b67", StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+
+            return state.VideoStream.VideoRange == VideoRange.HDR
+                   && state.VideoStream.VideoRangeType is VideoRangeType.HDR10 or VideoRangeType.HLG or VideoRangeType.DOVIWithHDR10 or VideoRangeType.DOVIWithHLG;
         }
 
         private bool IsHwTonemapAvailable(EncodingJobInfo state, EncodingOptions options)
@@ -1188,10 +1205,14 @@ namespace MediaBrowser.Controller.MediaEncoding
 
             if (state.MediaSource.VideoType == VideoType.Dvd || state.MediaSource.VideoType == VideoType.BluRay)
             {
-                var tmpConcatPath = Path.Join(_configurationManager.GetTranscodePath(), state.MediaSource.Id + ".concat");
-                _mediaEncoder.GenerateConcatConfig(state.MediaSource, tmpConcatPath);
+                var concatFilePath = Path.Join(_configurationManager.CommonApplicationPaths.CachePath, "concat", state.MediaSource.Id + ".concat");
+                if (!File.Exists(concatFilePath))
+                {
+                    _mediaEncoder.GenerateConcatConfig(state.MediaSource, concatFilePath);
+                }
+
                 arg.Append(" -f concat -safe 0 -i \"")
-                    .Append(tmpConcatPath)
+                    .Append(concatFilePath)
                     .Append("\" ");
             }
             else
@@ -2586,8 +2607,9 @@ namespace MediaBrowser.Controller.MediaEncoding
             return 128000 * (outputAudioChannels ?? audioStream.Channels ?? 2);
         }
 
-        public string GetAudioVbrModeParam(string encoder, int bitratePerChannel)
+        public string GetAudioVbrModeParam(string encoder, int bitrate, int channels)
         {
+            var bitratePerChannel = bitrate / Math.Max(channels, 1);
             if (string.Equals(encoder, "libfdk_aac", StringComparison.OrdinalIgnoreCase))
             {
                 return " -vbr:a " + bitratePerChannel switch
@@ -2602,14 +2624,26 @@ namespace MediaBrowser.Controller.MediaEncoding
 
             if (string.Equals(encoder, "libmp3lame", StringComparison.OrdinalIgnoreCase))
             {
-                return " -qscale:a " + bitratePerChannel switch
+                // lame's VBR is only good for a certain bitrate range
+                // For very low and very high bitrate, use abr mode
+                if (bitratePerChannel is < 122500 and > 48000)
                 {
-                    < 48000 => "8",
-                    < 64000 => "6",
-                    < 88000 => "4",
-                    < 112000 => "2",
-                    _ => "0"
-                };
+                    return " -qscale:a " + bitratePerChannel switch
+                    {
+                        < 64000 => "6",
+                        < 88000 => "4",
+                        < 112000 => "2",
+                        _ => "0"
+                    };
+                }
+
+                return " -abr:a 1" + " -b:a " + bitrate;
+            }
+
+            if (string.Equals(encoder, "aac_at", StringComparison.OrdinalIgnoreCase))
+            {
+                // aac_at's CVBR mode
+                return " -aac_at_mode:a 2" + " -b:a " + bitrate;
             }
 
             if (string.Equals(encoder, "libvorbis", StringComparison.OrdinalIgnoreCase))
@@ -2633,28 +2667,17 @@ namespace MediaBrowser.Controller.MediaEncoding
 
             var filters = new List<string>();
 
-            if (channels.HasValue
-                && channels.Value == 2
-                && state.AudioStream is not null
-                && state.AudioStream.Channels.HasValue
-                && state.AudioStream.Channels.Value == 6)
+            if (channels is 2 && state.AudioStream?.Channels is > 2)
             {
+                var hasDownMixFilter = DownMixAlgorithmsHelper.AlgorithmFilterStrings.TryGetValue((encodingOptions.DownMixStereoAlgorithm, DownMixAlgorithmsHelper.InferChannelLayout(state.AudioStream)), out var downMixFilterString);
+                if (hasDownMixFilter)
+                {
+                    filters.Add(downMixFilterString);
+                }
+
                 if (!encodingOptions.DownMixAudioBoost.Equals(1))
                 {
                     filters.Add("volume=" + encodingOptions.DownMixAudioBoost.ToString(CultureInfo.InvariantCulture));
-                }
-
-                switch (encodingOptions.DownMixStereoAlgorithm)
-                {
-                    case DownMixStereoAlgorithms.Dave750:
-                        filters.Add("pan=stereo|c0=0.5*c2+0.707*c0+0.707*c4+0.5*c3|c1=0.5*c2+0.707*c1+0.707*c5+0.5*c3");
-                        break;
-                    case DownMixStereoAlgorithms.NightmodeDialogue:
-                        filters.Add("pan=stereo|c0=c2+0.30*c0+0.30*c4|c1=c2+0.30*c1+0.30*c5");
-                        break;
-                    case DownMixStereoAlgorithms.None:
-                    default:
-                        break;
                 }
             }
 
@@ -3517,6 +3540,7 @@ namespace MediaBrowser.Controller.MediaEncoding
             var doDeintH264 = state.DeInterlace("h264", true) || state.DeInterlace("avc", true);
             var doDeintHevc = state.DeInterlace("h265", true) || state.DeInterlace("hevc", true);
             var doDeintH2645 = doDeintH264 || doDeintHevc;
+            var doToneMap = IsSwTonemapAvailable(state, options);
 
             var hasSubs = state.SubtitleStream is not null && state.SubtitleDeliveryMethod == SubtitleDeliveryMethod.Encode;
             var hasTextSubs = hasSubs && state.SubtitleStream.IsTextSubtitleStream;
@@ -3525,7 +3549,7 @@ namespace MediaBrowser.Controller.MediaEncoding
             /* Make main filters for video stream */
             var mainFilters = new List<string>();
 
-            mainFilters.Add(GetOverwriteColorPropertiesParam(state, false));
+            mainFilters.Add(GetOverwriteColorPropertiesParam(state, doToneMap));
 
             // INPUT sw surface(memory/copy-back from vram)
             // sw deint
@@ -3548,11 +3572,31 @@ namespace MediaBrowser.Controller.MediaEncoding
 
             // sw scale
             mainFilters.Add(swScaleFilter);
-            mainFilters.Add("format=" + outFormat);
 
-            // sw tonemap <= TODO: finsh the fast tonemap filter
+            // sw tonemap <= TODO: finish dovi tone mapping
 
-            // OUTPUT yuv420p/nv12 surface(memory)
+            if (doToneMap)
+            {
+                var tonemapArgs = $"tonemapx=tonemap={options.TonemappingAlgorithm}:desat={options.TonemappingDesat}:peak={options.TonemappingPeak}:t=bt709:m=bt709:p=bt709:format={outFormat}";
+
+                if (options.TonemappingParam != 0)
+                {
+                    tonemapArgs += $":param={options.TonemappingParam}";
+                }
+
+                if (string.Equals(options.TonemappingRange, "tv", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(options.TonemappingRange, "pc", StringComparison.OrdinalIgnoreCase))
+                {
+                    tonemapArgs += $":range={options.TonemappingRange}";
+                }
+
+                mainFilters.Add(tonemapArgs);
+            }
+            else
+            {
+                // OUTPUT yuv420p/nv12 surface(memory)
+                mainFilters.Add("format=" + outFormat);
+            }
 
             /* Make sub and overlay filters for subtitle stream */
             var subFilters = new List<string>();
@@ -5123,12 +5167,14 @@ namespace MediaBrowser.Controller.MediaEncoding
             var threeDFormat = state.MediaSource.Video3DFormat;
 
             var isVtEncoder = vidEncoder.Contains("videotoolbox", StringComparison.OrdinalIgnoreCase);
+            var isVtDecoder = vidDecoder.Contains("videotoolbox", StringComparison.OrdinalIgnoreCase);
 
             var doDeintH264 = state.DeInterlace("h264", true) || state.DeInterlace("avc", true);
             var doDeintHevc = state.DeInterlace("h265", true) || state.DeInterlace("hevc", true);
             var doDeintH2645 = doDeintH264 || doDeintHevc;
             var doVtTonemap = IsVideoToolboxTonemapAvailable(state, options);
             var doMetalTonemap = !doVtTonemap && IsHwTonemapAvailable(state, options);
+            var usingHwSurface = isVtDecoder && (_mediaEncoder.EncoderVersion >= _minFFmpegWorkingVtHwSurface);
 
             var scaleFormat = string.Empty;
             // Use P010 for Metal tone mapping, otherwise force an 8bit output.
@@ -5216,23 +5262,25 @@ namespace MediaBrowser.Controller.MediaEncoding
                     subFilters.Add(subTextSubtitlesFilter);
                 }
 
-                subFilters.Add("hwupload=derive_device=videotoolbox");
+                subFilters.Add("hwupload");
                 overlayFilters.Add("overlay_videotoolbox=eof_action=pass:repeatlast=0");
             }
 
+            if (usingHwSurface)
+            {
+                return (mainFilters, subFilters, overlayFilters);
+            }
+
+            // For old jellyfin-ffmpeg that has broken hwsurface, add a hwupload
             var needFiltering = mainFilters.Any(f => !string.IsNullOrEmpty(f)) ||
                                 subFilters.Any(f => !string.IsNullOrEmpty(f)) ||
                                 overlayFilters.Any(f => !string.IsNullOrEmpty(f));
-
-            // This is a workaround for ffmpeg's hwupload implementation
-            // For VideoToolbox encoders, a hwupload without a valid filter actually consuming its frame
-            // will cause the encoder to produce incorrect frames.
             if (needFiltering)
             {
                 // INPUT videotoolbox/memory surface(vram/uma)
                 // this will pass-through automatically if in/out format matches.
                 mainFilters.Insert(0, "format=nv12|p010le|videotoolbox_vld");
-                mainFilters.Insert(0, "hwupload=derive_device=videotoolbox");
+                mainFilters.Insert(0, "hwupload");
             }
 
             return (mainFilters, subFilters, overlayFilters);
@@ -6240,22 +6288,20 @@ namespace MediaBrowser.Controller.MediaEncoding
                                     || string.Equals("yuvj420p", videoStream.PixelFormat, StringComparison.OrdinalIgnoreCase);
             var is8_10bitSwFormatsVt = is8bitSwFormatsVt || string.Equals("yuv420p10le", videoStream.PixelFormat, StringComparison.OrdinalIgnoreCase);
 
-            // VideoToolbox's Hardware surface in ffmpeg is not only slower than hwupload, but also breaks HDR in many cases.
-            // For example: https://trac.ffmpeg.org/ticket/10884
-            // Disable it for now.
-            const bool UseHwSurface = false;
+            // The related patches make videotoolbox hardware surface working is only available in jellyfin-ffmpeg 7.0.1 at the moment.
+            bool useHwSurface = (_mediaEncoder.EncoderVersion >= _minFFmpegWorkingVtHwSurface) && IsVideoToolboxFullSupported();
 
             if (is8bitSwFormatsVt)
             {
                 if (string.Equals("avc", videoStream.Codec, StringComparison.OrdinalIgnoreCase)
                     || string.Equals("h264", videoStream.Codec, StringComparison.OrdinalIgnoreCase))
                 {
-                    return GetHwaccelType(state, options, "h264", bitDepth, UseHwSurface);
+                    return GetHwaccelType(state, options, "h264", bitDepth, useHwSurface);
                 }
 
                 if (string.Equals("vp8", videoStream.Codec, StringComparison.OrdinalIgnoreCase))
                 {
-                    return GetHwaccelType(state, options, "vp8", bitDepth, UseHwSurface);
+                    return GetHwaccelType(state, options, "vp8", bitDepth, useHwSurface);
                 }
             }
 
@@ -6264,12 +6310,12 @@ namespace MediaBrowser.Controller.MediaEncoding
                 if (string.Equals("hevc", videoStream.Codec, StringComparison.OrdinalIgnoreCase)
                     || string.Equals("h265", videoStream.Codec, StringComparison.OrdinalIgnoreCase))
                 {
-                    return GetHwaccelType(state, options, "hevc", bitDepth, UseHwSurface);
+                    return GetHwaccelType(state, options, "hevc", bitDepth, useHwSurface);
                 }
 
                 if (string.Equals("vp9", videoStream.Codec, StringComparison.OrdinalIgnoreCase))
                 {
-                    return GetHwaccelType(state, options, "vp9", bitDepth, UseHwSurface);
+                    return GetHwaccelType(state, options, "vp9", bitDepth, useHwSurface);
                 }
             }
 
@@ -6954,7 +7000,10 @@ namespace MediaBrowser.Controller.MediaEncoding
 
             var channels = state.OutputAudioChannels;
 
-            if (channels.HasValue && ((channels.Value != 2 && state.AudioStream?.Channels != 6) || encodingOptions.DownMixStereoAlgorithm == DownMixStereoAlgorithms.None))
+            var useDownMixAlgorithm = state.AudioStream is not null
+                                      && DownMixAlgorithmsHelper.AlgorithmFilterStrings.ContainsKey((encodingOptions.DownMixStereoAlgorithm, DownMixAlgorithmsHelper.InferChannelLayout(state.AudioStream)));
+
+            if (channels.HasValue && !useDownMixAlgorithm)
             {
                 args += " -ac " + channels.Value;
             }
@@ -6962,8 +7011,8 @@ namespace MediaBrowser.Controller.MediaEncoding
             var bitrate = state.OutputAudioBitrate;
             if (bitrate.HasValue && !LosslessAudioCodecs.Contains(codec, StringComparison.OrdinalIgnoreCase))
             {
-                var vbrParam = GetAudioVbrModeParam(codec, bitrate.Value / (channels ?? 2));
-                if (encodingOptions.EnableAudioVbr && vbrParam is not null)
+                var vbrParam = GetAudioVbrModeParam(codec, bitrate.Value, channels ?? 2);
+                if (encodingOptions.EnableAudioVbr && state.EnableAudioVbrEncoding && vbrParam is not null)
                 {
                     args += vbrParam;
                 }
@@ -6993,8 +7042,8 @@ namespace MediaBrowser.Controller.MediaEncoding
 
             if (bitrate.HasValue && !LosslessAudioCodecs.Contains(outputCodec, StringComparison.OrdinalIgnoreCase))
             {
-                var vbrParam = GetAudioVbrModeParam(GetAudioEncoder(state), bitrate.Value / (channels ?? 2));
-                if (encodingOptions.EnableAudioVbr && vbrParam is not null)
+                var vbrParam = GetAudioVbrModeParam(GetAudioEncoder(state), bitrate.Value, channels ?? 2);
+                if (encodingOptions.EnableAudioVbr && state.EnableAudioVbrEncoding && vbrParam is not null)
                 {
                     audioTranscodeParams.Add(vbrParam);
                 }

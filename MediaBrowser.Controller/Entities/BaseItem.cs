@@ -487,6 +487,8 @@ namespace MediaBrowser.Controller.Entities
 
         public static IMediaSourceManager MediaSourceManager { get; set; }
 
+        public static IMediaSegmentManager MediaSegmentManager { get; set; }
+
         /// <summary>
         /// Gets or sets the name of the forced sort.
         /// </summary>
@@ -1116,7 +1118,10 @@ namespace MediaBrowser.Controller.Entities
                 RunTimeTicks = item.RunTimeTicks,
                 Container = item.Container,
                 Size = item.Size,
-                Type = type
+                Type = type,
+                HasSegments = MediaSegmentManager.IsTypeSupported(item)
+                    && (protocol is null or MediaProtocol.File)
+                    && MediaSegmentManager.HasSegments(item.Id)
             };
 
             if (string.IsNullOrEmpty(info.Path))
@@ -2497,11 +2502,6 @@ namespace MediaBrowser.Controller.Entities
             return new[] { Id };
         }
 
-        public virtual List<ExternalUrl> GetRelatedUrls()
-        {
-            return new List<ExternalUrl>();
-        }
-
         public virtual double? GetRefreshProgress()
         {
             return null;
@@ -2549,14 +2549,24 @@ namespace MediaBrowser.Controller.Entities
                 StringComparison.OrdinalIgnoreCase);
         }
 
-        public IReadOnlyList<BaseItem> GetThemeSongs()
+        public IReadOnlyList<BaseItem> GetThemeSongs(User user = null)
         {
-            return GetExtras().Where(e => e.ExtraType == Model.Entities.ExtraType.ThemeSong).ToArray();
+            return GetThemeSongs(user, Array.Empty<(ItemSortBy, SortOrder)>());
         }
 
-        public IReadOnlyList<BaseItem> GetThemeVideos()
+        public IReadOnlyList<BaseItem> GetThemeSongs(User user, IEnumerable<(ItemSortBy SortBy, SortOrder SortOrder)> orderBy)
         {
-            return GetExtras().Where(e => e.ExtraType == Model.Entities.ExtraType.ThemeVideo).ToArray();
+            return LibraryManager.Sort(GetExtras().Where(e => e.ExtraType == Model.Entities.ExtraType.ThemeSong), user, orderBy).ToArray();
+        }
+
+        public IReadOnlyList<BaseItem> GetThemeVideos(User user = null)
+        {
+            return GetThemeVideos(user, Array.Empty<(ItemSortBy, SortOrder)>());
+        }
+
+        public IReadOnlyList<BaseItem> GetThemeVideos(User user, IEnumerable<(ItemSortBy SortBy, SortOrder SortOrder)> orderBy)
+        {
+            return LibraryManager.Sort(GetExtras().Where(e => e.ExtraType == Model.Entities.ExtraType.ThemeVideo), user, orderBy).ToArray();
         }
 
         /// <summary>

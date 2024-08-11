@@ -350,10 +350,17 @@ namespace MediaBrowser.Controller.Entities.TV
 
         public List<BaseItem> GetSeasonEpisodes(Season parentSeason, User user, DtoOptions options, bool shouldIncludeMissingEpisodes)
         {
+            var queryFromSeries = ConfigurationManager.Configuration.DisplaySpecialsWithinSeasons;
+
+            // add optimization when this setting is not enabled
+            var seriesKey = queryFromSeries ?
+                GetUniqueSeriesKey(this) :
+                GetUniqueSeriesKey(parentSeason);
+
             var query = new InternalItemsQuery(user)
             {
-                AncestorWithPresentationUniqueKey = null,
-                SeriesPresentationUniqueKey = GetUniqueSeriesKey(this),
+                AncestorWithPresentationUniqueKey = queryFromSeries ? null : seriesKey,
+                SeriesPresentationUniqueKey = queryFromSeries ? seriesKey : null,
                 IncludeItemTypes = new[] { BaseItemKind.Episode },
                 OrderBy = new[] { (ItemSortBy.SortName, SortOrder.Ascending) },
                 DtoOptions = options
@@ -481,23 +488,6 @@ namespace MediaBrowser.Controller.Entities.TV
             }
 
             return hasChanges;
-        }
-
-        public override List<ExternalUrl> GetRelatedUrls()
-        {
-            var list = base.GetRelatedUrls();
-
-            var imdbId = this.GetProviderId(MetadataProvider.Imdb);
-            if (!string.IsNullOrEmpty(imdbId))
-            {
-                list.Add(new ExternalUrl
-                {
-                    Name = "Trakt",
-                    Url = string.Format(CultureInfo.InvariantCulture, "https://trakt.tv/shows/{0}", imdbId)
-                });
-            }
-
-            return list;
         }
     }
 }
