@@ -290,16 +290,15 @@ public class UserController : BaseJellyfinApiController
         [FromBody, Required] UpdateUserPassword request)
     {
         var requestUserId = userId ?? User.GetUserId();
-        if (!RequestHelpers.AssertCanUpdateUser(_userManager, User, requestUserId, true))
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, "User is not allowed to update the password.");
-        }
-
         var user = _userManager.GetUserById(requestUserId);
-
         if (user is null)
         {
-            return NotFound("User not found");
+            return NotFound();
+        }
+
+        if (!RequestHelpers.AssertCanUpdateUser(User, user, true))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, "User is not allowed to update the password.");
         }
 
         if (request.ResetPassword)
@@ -312,7 +311,6 @@ public class UserController : BaseJellyfinApiController
             {
                 var success = await _userManager.AuthenticateUser(
                     user.Username,
-                    request.CurrentPw ?? string.Empty,
                     request.CurrentPw ?? string.Empty,
                     HttpContext.GetNormalizedRemoteIP().ToString(),
                     false).ConfigureAwait(false);
@@ -402,7 +400,7 @@ public class UserController : BaseJellyfinApiController
             return NotFound();
         }
 
-        if (!RequestHelpers.AssertCanUpdateUser(_userManager, User, requestUserId, true))
+        if (!RequestHelpers.AssertCanUpdateUser(User, user, true))
         {
             return StatusCode(StatusCodes.Status403Forbidden, "User update not allowed.");
         }
@@ -412,7 +410,7 @@ public class UserController : BaseJellyfinApiController
             await _userManager.RenameUser(user, updateUser.Name).ConfigureAwait(false);
         }
 
-        await _userManager.UpdateConfigurationAsync(user.Id, updateUser.Configuration).ConfigureAwait(false);
+        await _userManager.UpdateConfigurationAsync(requestUserId, updateUser.Configuration).ConfigureAwait(false);
 
         return NoContent();
     }
@@ -511,7 +509,13 @@ public class UserController : BaseJellyfinApiController
         [FromBody, Required] UserConfiguration userConfig)
     {
         var requestUserId = userId ?? User.GetUserId();
-        if (!RequestHelpers.AssertCanUpdateUser(_userManager, User, requestUserId, true))
+        var user = _userManager.GetUserById(requestUserId);
+        if (user is null)
+        {
+            return NotFound();
+        }
+
+        if (!RequestHelpers.AssertCanUpdateUser(User, user, true))
         {
             return StatusCode(StatusCodes.Status403Forbidden, "User configuration update not allowed");
         }
