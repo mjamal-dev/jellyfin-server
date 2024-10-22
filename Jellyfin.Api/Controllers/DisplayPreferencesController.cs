@@ -80,7 +80,6 @@ public class DisplayPreferencesController : BaseJellyfinApiController
         foreach (var homeSection in displayPreferences.HomeSections)
         {
             dto.CustomPrefs["homesection" + homeSection.Order] = homeSection.Type.ToString().ToLowerInvariant();
-            
         }
 
         dto.CustomPrefs["chromecastVersion"] = displayPreferences.ChromecastVersion.ToString().ToLowerInvariant();

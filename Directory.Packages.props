@@ -77,20 +77,8 @@
     <PackageVersion Include="System.Globalization" Version="4.3.0" />
     <PackageVersion Include="System.Linq.Async" Version="6.0.1" />
     <PackageVersion Include="System.Text.Encoding.CodePages" Version="8.0.0" />
-<<<<<<< HEAD
-    <PackageVersion Include="System.Text.Json" Version="8.0.4" />
-<<<<<<< HEAD
-<<<<<<< HEAD
-    <PackageVersion Include="System.Threading.Tasks.Dataflow" Version="8.0.0" />
-=======
-=======
     <PackageVersion Include="System.Text.Json" Version="8.0.5" />
->>>>>>> 7c22a99e057cccf152357344bcf155280867b3d0
     <PackageVersion Include="System.Threading.Tasks.Dataflow" Version="8.0.1" />
->>>>>>> upstream/master
-=======
-    <PackageVersion Include="System.Threading.Tasks.Dataflow" Version="8.0.1" />
->>>>>>> f7227c6ca184baecac9756c8123f9a3cfa075b5b
     <PackageVersion Include="TagLibSharp" Version="2.3.0" />
     <PackageVersion Include="z440.atl.core" Version="6.5.0" />
     <PackageVersion Include="TMDbLib" Version="2.2.0" />

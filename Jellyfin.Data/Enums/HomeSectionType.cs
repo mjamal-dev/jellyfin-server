@@ -13,46 +13,46 @@ namespace Jellyfin.Data.Enums
         /// <summary>
         /// My Media.
         /// </summary>
-        SmallLibraryTiles = 2,
+        SmallLibraryTiles = 3,
 
         /// <summary>
         /// My Media Small.
         /// </summary>
-        LibraryButtons = 7,
+        LibraryButtons = 8,
 
         /// <summary>
         /// Active Recordings.
         /// </summary>
-        ActiveRecordings = 3,
+        ActiveRecordings = 5,
 
         /// <summary>
         /// Continue Watching.
         /// </summary>
-        Resume = 0,
+        Resume = 1,
 
         /// <summary>
         /// Continue Listening.
         /// </summary>
-        ResumeAudio = 5,
+        ResumeAudio = 6,
 
         /// <summary>
         /// Latest Media.
         /// </summary>
-        LatestMedia = 1,
+        LatestMedia = 2,
 
         /// <summary>
         /// Next Up.
         /// </summary>
-        NextUp = 3,
+        NextUp = 4,
 
         /// <summary>
         /// Live TV.
         /// </summary>
-        LiveTv = 4,
+        LiveTv = 7,
 
         /// <summary>
         /// Continue Reading.
         /// </summary>
-        ResumeBook = 6
+        ResumeBook = 9
     }
 }
