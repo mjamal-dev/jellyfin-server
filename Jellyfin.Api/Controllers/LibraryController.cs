@@ -23,6 +23,7 @@ using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Activity;
 using MediaBrowser.Model.Configuration;
@@ -53,6 +54,7 @@ public class LibraryController : BaseJellyfinApiController
     private readonly ILibraryMonitor _libraryMonitor;
     private readonly ILogger<LibraryController> _logger;
     private readonly IServerConfigurationManager _serverConfigurationManager;
+    private readonly DownloadThrottler _downloadThrottler;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LibraryController"/> class.
@@ -66,6 +68,8 @@ public class LibraryController : BaseJellyfinApiController
     /// <param name="libraryMonitor">Instance of the <see cref="ILibraryMonitor"/> interface.</param>
     /// <param name="logger">Instance of the <see cref="ILogger{LibraryController}"/> interface.</param>
     /// <param name="serverConfigurationManager">Instance of the <see cref="IServerConfigurationManager"/> interface.</param>
+    /// <param name="downloadThrottler">Object of the <see cref="DownloadThrottler"/> class.</param>
+
     public LibraryController(
         IProviderManager providerManager,
         ILibraryManager libraryManager,
@@ -75,7 +79,8 @@ public class LibraryController : BaseJellyfinApiController
         ILocalizationManager localization,
         ILibraryMonitor libraryMonitor,
         ILogger<LibraryController> logger,
-        IServerConfigurationManager serverConfigurationManager)
+        IServerConfigurationManager serverConfigurationManager,
+        DownloadThrottler downloadThrottler)
     {
         _providerManager = providerManager;
         _libraryManager = libraryManager;
@@ -86,6 +91,7 @@ public class LibraryController : BaseJellyfinApiController
         _libraryMonitor = libraryMonitor;
         _logger = logger;
         _serverConfigurationManager = serverConfigurationManager;
+        _downloadThrottler = downloadThrottler;
     }
 
     /// <summary>
@@ -652,7 +658,7 @@ public class LibraryController : BaseJellyfinApiController
     }
 
     /// <summary>
-    /// Downloads item media.
+    /// Downloads item media and applies throttling if needed.
     /// </summary>
     /// <param name="itemId">The item id.</param>
     /// <response code="200">Media downloaded.</response>
@@ -698,8 +704,14 @@ public class LibraryController : BaseJellyfinApiController
 
         // Quotes are valid in linux. They'll possibly cause issues here.
         var filename = Path.GetFileName(item.Path)?.Replace("\"", string.Empty, StringComparison.Ordinal);
+        var fileStream = new FileStream(item.Path, FileMode.Open, FileAccess.Read, FileShare.Read);
 
-        return PhysicalFile(item.Path, MimeTypes.GetMimeType(item.Path), filename, true);
+        Response.ContentType = MimeTypes.GetMimeType(item.Path);
+        Response.Headers.Append("Content-Disposition", $"attachment; filename=\"{filename}\"");
+
+        await _downloadThrottler.ThrottleAsync(fileStream, Response.Body, HttpContext.RequestAborted).ConfigureAwait(false);
+
+        return new EmptyResult();
     }
 
     /// <summary>

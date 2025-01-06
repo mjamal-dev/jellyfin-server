@@ -195,7 +195,9 @@ public class ServerConfiguration : BaseApplicationConfiguration
 
     public NameValuePair[] ContentTypes { get; set; } = Array.Empty<NameValuePair>();
 
-    public int RemoteClientBitrateLimit { get; set; }
+    public int RemoteClientBitrateLimit { get; set; } = 8000000;
+
+    public int RemoteClientDownloadLimit { get; set; } = 1000000;
 
     public bool EnableFolderView { get; set; } = false;
 

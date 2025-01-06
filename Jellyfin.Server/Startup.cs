@@ -19,6 +19,7 @@ using Jellyfin.Server.Infrastructure;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Extensions;
+using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.XbmcMetadata;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -29,6 +30,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Prometheus;
 
 namespace Jellyfin.Server
@@ -74,6 +76,12 @@ namespace Jellyfin.Server
             services.AddCustomAuthentication();
 
             services.AddJellyfinApiAuthorization();
+            services.AddSingleton(provider =>
+                {
+                    var config = _serverConfigurationManager.Configuration;
+                    var logger = provider.GetRequiredService<ILogger<DownloadThrottler>>();
+                    return new DownloadThrottler(config.RemoteClientDownloadLimit, logger);
+                });
 
             var productHeader = new ProductInfoHeaderValue(
                 _serverApplicationHost.Name.Replace(' ', '-'),
