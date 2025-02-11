@@ -782,11 +782,9 @@ public class LibraryController : BaseJellyfinApiController
             Genres = item.Genres,
             Limit = limit,
             IncludeItemTypes = includeItemTypes.ToArray(),
-            SimilarTo = item,
             DtoOptions = dtoOptions,
             EnableTotalRecordCount = !isMovie ?? true,
             EnableGroupByMetadataKey = isMovie ?? false,
-            MinSimilarityScore = 2 // A remnant from album/artist scoring
         };
 
         // ExcludeArtistIds
@@ -795,7 +793,7 @@ public class LibraryController : BaseJellyfinApiController
             query.ExcludeArtistIds = excludeArtistIds;
         }
 
-        List<BaseItem> itemsResult = _libraryManager.GetItemList(query);
+        var itemsResult = _libraryManager.GetItemList(query);
 
         var returnList = _dtoService.GetBaseItemDtos(itemsResult, dtoOptions, user);
 
@@ -861,6 +859,16 @@ public class LibraryController : BaseJellyfinApiController
 
         result.LyricFetchers = plugins
             .SelectMany(i => i.Plugins.Where(p => p.Type == MetadataPluginType.LyricFetcher))
+            .Select(i => new LibraryOptionInfoDto
+            {
+                Name = i.Name,
+                DefaultEnabled = true
+            })
+            .DistinctBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        result.MediaSegmentProviders = plugins
+            .SelectMany(i => i.Plugins.Where(p => p.Type == MetadataPluginType.MediaSegmentProvider))
             .Select(i => new LibraryOptionInfoDto
             {
                 Name = i.Name,
